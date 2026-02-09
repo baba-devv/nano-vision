@@ -103,53 +103,63 @@ class ZoneSetup:
         cv2.namedWindow(window_name)
         cv2.setMouseCallback(window_name, mouse_callback)
         
-        # Main interaction loop
-        while True:
-            # Draw the current state
-            display_frame = self._draw_zone_overlay(reference_frame.copy(), 
-                                            zone_points, 
-                                            drawing_complete)
-            
-            height, width = display_frame.shape[:2]  # get the frame dimensions to position the text correctly
-            base_dimension = min(width, height)  # use the smaller dimension to scale text size
-
-            print(f"Frame dimensions: {width}x{height}, base dimension for scaling: {base_dimension}")  
-
-            font_size = max(0.5, base_dimension / 1920)  # scale font size based on frame size, with a minimum size - normalized to 1080p reference frame
-
-            # Add instruction text overlay
-            status_text = f"Points: {len(zone_points)}"
-            if drawing_complete:
-                status_text = "ZONE COMPLETE - Press 'S' to Save / Press 'R' to Reset"
+        try:
+            # Main interaction loop
+            while True:
+                # Draw the current state
+                display_frame = self._draw_zone_overlay(reference_frame.copy(), 
+                                                zone_points, 
+                                                drawing_complete)
                 
-                self._draw_styled_text(display_frame, status_text, font_size, pos=(int(width*0.02), int(height*0.05))) # use this at other places
-            else:
-                cv2.putText(display_frame, status_text, (int(width*0.02), int(height*0.05)),
-                        cv2.FONT_HERSHEY_DUPLEX, 0.7, (255, 255, 255), int(font_size))
-                cv2.putText(display_frame, "Left click: Add point | Right click: Complete", 
-                        (int(width*0.02), int(height*0.1)), cv2.FONT_HERSHEY_DUPLEX, 0.5, (255, 255, 255), int(font_size/2))
-            
-            cv2.imshow(window_name, display_frame)
-            
-            # Handle keyboard input
-            key = cv2.waitKey(1) & 0xFF
-            
-            if key == ord('q'):
-                print("\nSetup cancelled by user.")
-                zone_points = None
+                height, width = display_frame.shape[:2]  # get the frame dimensions to position the text correctly
+                base_dimension = min(width, height)  # use the smaller dimension to scale text size
+
+                font_size = max(0.5, base_dimension / 1920)  # scale font size based on frame size, with a minimum size - normalized to 1080p reference frame
+
+                # Add instruction text overlay
+                status_text = f"Points: {len(zone_points)}"
+                if drawing_complete:
+                    status_text = "ZONE COMPLETE - Press 'S' to Save / Press 'R' to Reset"
+                    
+                    self._draw_styled_text(display_frame, status_text, font_size, pos=(int(width*0.02), int(height*0.05))) # use this at other places
+                else:
+                    cv2.putText(display_frame, status_text, (int(width*0.02), int(height*0.05)),
+                            cv2.FONT_HERSHEY_DUPLEX, 0.7, (255, 255, 255), int(font_size))
+                    cv2.putText(display_frame, "Left click: Add point | Right click: Complete", 
+                            (int(width*0.02), int(height*0.1)), cv2.FONT_HERSHEY_DUPLEX, 0.5, (255, 255, 255), int(font_size/2))
                 
-            elif key == ord('r'):
-                # Reset zone
-                zone_points = []
-                drawing_complete = False
-                print("\nZone reset. Start drawing again.")
+                cv2.imshow(window_name, display_frame)
                 
-            elif key == ord('s') and drawing_complete:
-                break
-        
-        # Cleanup
-        cap.release()
-        cv2.destroyAllWindows()
+                # Handle keyboard input
+                key = cv2.waitKey(1) & 0xFF
+                
+                if key == ord('q'):
+                    print("\nSetup cancelled by user.")
+                    zone_points = None
+                    
+                elif key == ord('r'):
+                    # Reset zone
+                    zone_points = []
+                    drawing_complete = False
+                    print("\nZone reset. Start drawing again.")
+                    
+                elif key == ord('s') and drawing_complete:
+                    break
+
+        finally:
+            # Cleanup
+            try:
+                cv2.destroyWindow(window_name)
+                # Flush the GUI event loop to actually destroy the window
+                for _ in range(10):
+                    cv2.waitKey(1)
+            except:
+                pass
+            
+            try:
+                cap.release()
+            except:
+                pass
 
         return zone_points
     

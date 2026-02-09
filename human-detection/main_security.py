@@ -10,6 +10,8 @@ import threading
 import os
 from datetime import datetime
 
+import torch
+
 from telegram_notifier.notifier import AsyncTelegramNotifier
   
 
@@ -20,6 +22,11 @@ class SecuritySystem:
         model_name = self.config.get("object_detection_model", {}).get("yolo_model", "")
         print(f"Loading {model_name}...")
         self.model = YOLO(model_name)
+
+        device = "mps" if torch.backends.mps.is_available() else "cpu"
+        self.model.to(device)
+
+        print(f"YOLO running on : {device}")
 
         self.video_sources = self.config.get("video_sources", [])
         if not self.video_sources:
@@ -34,7 +41,7 @@ class SecuritySystem:
         
         # Track history: {track_id: [ (x,y), (x,y)... ]}
         self.track_history = defaultdict(lambda: deque(maxlen=self.config.get("object_detection_model", {}).get("history_frames", 10)))  # Stores recent positions for movement analysis - the size constraint will automatically discard old positions, keeping only the most recent ones for analysis
-        self.last_trigger_time = None # temporary variable for handling the alert cooldown
+        self.last_trigger_time = time.time() - 60 # temporary variable for handling the alert cooldown
 
         self.track_alert = defaultdict(lambda: 0)  # To avoid repeated alerts
 
@@ -132,24 +139,24 @@ class SecuritySystem:
 
             # Run YOLO with Tracking enabled (persist=True is crucial for ID tracking)
             # classes=[0] filters for 'person' only
-            results = self.model.track(frame, persist=True, classes=[0], verbose=False)
+            config_threshold = self.config.get("object_detection_model", {}).get("confidence_threshold", 0.4)
+            max_det = self.config.get("object_detection_model", {}).get("max_detections", 10)
+            results = self.model.track(frame, persist=True, classes=[0], verbose=False, conf=config_threshold, max_det=max_det)  # Adjust max_det as needed for performance
 
             # Draw the Safe Zone (Green Boundary)
             cv2.polylines(frame, [self.zone_polygon], isClosed=True, color=(0, 255, 0), thickness=2)
 
             if results[0].boxes.id is not None:
 
-                ## check if the alert_cooldown has passed - this is to avoid spamming, ideally should be at track id level, but will handle this later when implementing face detection or fine tuning the YOLO model
-                if (time.time() - self.last_trigger_time < self.config.get("object_detection_model", {}).get("alert_cooldown", 60)):
-                    continue
+                # ## check if the alert_cooldown has passed - this is to avoid spamming, ideally should be at track id level, but will handle this later when implementing face detection or fine tuning the YOLO model
+                # if (time.time() - self.last_trigger_time < self.config.get("object_detection_model", {}).get("alert_cooldown", 60)):
+                #     continue
 
                 boxes = results[0].boxes.xyxy.cpu().numpy().astype(int)
                 track_ids = results[0].boxes.id.cpu().numpy().astype(int)
                 confs = results[0].boxes.conf.cpu().numpy()
 
                 for box, track_id, conf in zip(boxes, track_ids, confs):
-                    if conf < self.config.get("object_detection_model", {}).get("confidence_threshold", 0.4):
-                        continue
 
                     x1, y1, x2, y2 = box
 
@@ -201,9 +208,10 @@ class SecuritySystem:
             if self.config.get("open_cam_viewer", False):
                 # Display Status - comment when running headless
                 cv2.imshow("Conference AI Security System", frame)
+                if cv2.waitKey(1) & 0xFF == ord('q'):
+                    self.stopped = True
 
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                self.stopped = True
+            # time.sleep(1/30)
 
         print("--- SYSTEM DISARMED ---")
         self.cap.release()
@@ -225,11 +233,6 @@ class SecuritySystem:
 
         # Create directory if it doesn't exist
         os.makedirs(os.path.dirname(filename), exist_ok=True)
-        
-        # Resize the image to reduce file size
-        # width = 1280
-        # height = int(frame.shape[0] * (width / frame.shape[1]))
-        # resized_frame = cv2.resize(frame, (width, height), interpolation=cv2.INTER_AREA)
 
         # First, encode with high quality to check size
         _, buffer_high_quality = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
@@ -253,6 +256,7 @@ class SecuritySystem:
         
         # Convert buffer to BytesIO for telegram/VLM
         image_stream = io.BytesIO(buffer)
+        image_stream.seek(0) # Reset pointer to beginning
         
         return image_stream
 
@@ -267,13 +271,11 @@ if __name__ == "__main__":
 
 
 ### @PLAN:
-
-# 1. Update the object detection rectangle or square to be more broad and big font
-# 2. to compress or not to compress the video depends on the size of the image being generated (if above a certain size, compress it - say 200kb or something)
-# 2a. image storage to a custom folder and also purging logic for the same - the folders should be created at a date level (whenever a new day starts, a new folder is created and the old folders are purged after a certain number of days - say 7 or something)
-# 2b. when the image is going to the telegram bot or VLM, it should be in memory and not read from disk, the storage to disk can be done separately - this is already done in the code above
-# 3. Packaging the code - maybe pyproject.toml or something - want to ship this as a binary.
-# 3a. enable the ssh part of the code so that any external system can take the access via ssh login and see the camera feeds, etc.
+# 1. Implement the VLM model
+# 2. Modularize the code and make it structured - similar to a well maintained Open Source repo - with the right folder structure, etc. 
+# 3a. 
+# 3b. Packaging the code - maybe pyproject.toml or something - want to ship this as a binary.
+# 3c. enable the ssh part of the code so that any external system can take the access via ssh login and see the camera feeds, etc.
 
 # 4. Integrating the VLM model which takes image as an input and generates a description - which goes to the telegram bot.
 

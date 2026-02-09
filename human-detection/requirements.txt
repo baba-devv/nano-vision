@@ -1,0 +1,4 @@
+opencv-python==4.13.0.92
+python-telegram-bot==22.6
+ultralytics==8.4.13
+schedule==1.2.2
